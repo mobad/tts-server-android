@@ -2,21 +2,19 @@ package com.github.jing332.common.audio
 
 import android.media.MediaCodec
 import android.media.MediaCodec.BufferInfo
+import android.media.MediaCodecList
+import android.media.MediaCodecList.ALL_CODECS
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.os.Build
 import android.os.SystemClock
 import android.text.TextUtils
 import android.util.Log
 import com.github.jing332.common.audio.AudioDecoderException.Companion.ERROR_CODE_NO_AUDIO_TRACK
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import okio.ByteString
-import okio.ByteString.Companion.toByteString
 import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
-import java.nio.charset.StandardCharsets
 import kotlin.coroutines.coroutineContext
 
 
@@ -63,12 +61,7 @@ class AudioDecoder {
         private fun getFormats(srcData: ByteArray): List<MediaFormat> {
             kotlin.runCatching {
                 val mediaExtractor = MediaExtractor()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                    mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
-                else
-                    mediaExtractor.setDataSource(
-                        "data:" + "" + ";base64," + srcData.toByteString().base64()
-                    )
+                mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
 
                 val formats = mutableListOf<MediaFormat>()
                 for (i in 0 until mediaExtractor.trackCount) {
@@ -108,7 +101,8 @@ class AudioDecoder {
 //                GcManager.doGC()
             }
             try {
-                mediaCodec = MediaCodec.createDecoderByType(mime)
+                val codec = MediaCodecList(ALL_CODECS).findDecoderForFormat(mediaFormat)
+                mediaCodec = MediaCodec.createByCodecName(codec)
                 oldMime = mime
             } catch (ioException: IOException) {
                 //设备无法创建，直接抛出
@@ -117,6 +111,7 @@ class AudioDecoder {
             }
         }
         mediaCodec!!.reset()
+        mediaFormat.setInteger(MediaFormat.KEY_PRIORITY, 0)
         mediaCodec!!.configure(mediaFormat, null, null, 0)
         return mediaCodec as MediaCodec
     }
@@ -136,12 +131,7 @@ class AudioDecoder {
                 onRead.invoke(data)
                 return
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
-            else
-                mediaExtractor.setDataSource(
-                    "data:" + currentMime + ";base64," + srcData.toByteString().base64()
-                )
+            mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
 
             decodeInternal(mediaExtractor, sampleRate) {
                 onRead.invoke(it)
@@ -166,9 +156,9 @@ class AudioDecoder {
     ) {
         val mediaExtractor = MediaExtractor()
         try {
+            val stream = InputStreamMediaDataSource(ins)
             val bytes = ByteArray(15)
-            val len = ins.read(bytes)
-
+            val len = stream.readAt(0, bytes, 0, 15)
             if (len == -1) throw AudioDecoderException(message = "读取音频流前15字节失败: len == -1")
             if (bytes.decodeToString().endsWith("WAVEfmt")) {
                 ins.buffered().use { buffered ->
@@ -182,13 +172,7 @@ class AudioDecoder {
                 return
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                mediaExtractor.setDataSource(InputStreamMediaDataSource(ins))
-            else
-                throw AudioDecoderException(
-                    AudioDecoderException.ERROR_CODE_NOT_SUPPORT_A5,
-                    "音频流解码器不支持 Android 5"
-                )
+            mediaExtractor.setDataSource(stream)
 
             decodeInternal(mediaExtractor, sampleRate, timeoutUs) {
                 onRead.invoke(it)
@@ -210,67 +194,95 @@ class AudioDecoder {
         val trackFormat = mediaExtractor.selectAudioTrack()
         val mime = trackFormat.mime
 
-        //opus的音频必须设置这个才能正确的解码
-        if ("audio/opus" == mime) trackFormat.compatOpus(sampleRate)
-
         //创建解码器
         val mediaCodec = getMediaCodec(mime, trackFormat)
         mediaCodec.start()
 
-        val bufferInfo = BufferInfo()
-        var inputBuffer: ByteBuffer?
-        val startNanos = SystemClock.elapsedRealtimeNanos()
-        while (coroutineContext.isActive) {
-            //获取可用的inputBuffer，输入参数-1代表一直等到，0代表不等待，10*1000代表10秒超时
-            val inputIndex = mediaCodec.dequeueInputBuffer(timeoutUs)
-            if (inputIndex < 0) break
+        var endOfInput = false
+        var endOfOutput = false
 
-            bufferInfo.presentationTimeUs = mediaExtractor.sampleTime
+        while (coroutineContext.isActive && !endOfOutput) {
+            if (!endOfInput) {
+                endOfInput = handleInput(mediaCodec, mediaExtractor, timeoutUs)
+            }
 
-            inputBuffer = mediaCodec.getInputBuffer(inputIndex)
-            if (inputBuffer != null) {
-                inputBuffer.clear()
-            } else
-                continue
+            endOfOutput = handleOutput(mediaCodec, onRead, timeoutUs)
+        }
+    }
+
+    private fun handleInput(
+        mediaCodec: MediaCodec,
+        mediaExtractor: MediaExtractor,
+        timeoutUs: Long = 5000L
+    ): Boolean {
+        //获取可用的inputBuffer，输入参数-1代表一直等到，0代表不等待，10*1000代表10秒超时
+        val inputIndex = mediaCodec.dequeueInputBuffer(timeoutUs)
+        if (inputIndex >= 0) {
+            val inputBuffer = mediaCodec.getInputBuffer(inputIndex) ?: return false
 
             //从流中读取的采样数量
             val sampleSize = mediaExtractor.readSampleData(inputBuffer, 0)
-            if (sampleSize > 0) {
-                bufferInfo.size = sampleSize
+            if (sampleSize >= 0) {
                 //入队解码
-                mediaCodec.queueInputBuffer(inputIndex, 0, sampleSize, 0, 0)
+                mediaCodec.queueInputBuffer(
+                    inputIndex,
+                    0,
+                    sampleSize,
+                    mediaExtractor.sampleTime,
+                    mediaExtractor.sampleFlags
+                )
                 //移动到下一个采样点
+                val startNanos = SystemClock.elapsedRealtimeNanos()
                 if (!mediaExtractor.nextSample(startNanos)) {
                     Log.d(TAG, "nextSample(): 已到达流末尾EOF")
                 }
-            } else
-                break
-
-            //取解码后的数据
-            var outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
-            //不一定能一次取完，所以要循环取
-            var outputBuffer: ByteBuffer?
-            val pcmData = ByteArray(bufferInfo.size)
-
-            while (coroutineContext.isActive && outputIndex >= 0) {
-                outputBuffer = mediaCodec.getOutputBuffer(outputIndex)
-                if (outputBuffer != null) {
-                    outputBuffer.get(pcmData)
-                    outputBuffer.clear() //用完后清空，复用
-                }
-
-                onRead.invoke(pcmData)
-                mediaCodec.releaseOutputBuffer(/* index = */ outputIndex, /* render = */ false)
-                outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+            } else {
+                mediaCodec.queueInputBuffer(
+                    inputIndex,
+                    0,
+                    0,
+                    0,
+                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                )
+                return true
             }
         }
+
+        return false
+    }
+
+    private suspend fun handleOutput(
+        mediaCodec: MediaCodec,
+        onRead: suspend (pcmData: ByteArray) -> Unit,
+        timeoutUs: Long = 5000L,
+    ): Boolean {
+        //取解码后的数据/
+        val bufferInfo = BufferInfo()
+        val outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+        if (outputIndex >= 0) {
+            //不一定能一次取完，所以要循环取
+            val outputBuffer = mediaCodec.getOutputBuffer(outputIndex)
+            if (outputBuffer != null) {
+                val pcmData = ByteArray(bufferInfo.size)
+                outputBuffer.get(pcmData)
+                outputBuffer.clear() //用完后清空，复用
+
+                // Should be before release to avoid overflow?
+                onRead.invoke(pcmData)
+            }
+
+            mediaCodec.releaseOutputBuffer(outputIndex, false)
+
+            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                return true
+            }
+        }
+
+        return false
     }
 
     @Suppress("UNUSED_PARAMETER")
     private fun MediaExtractor.nextSample(startNanos: Long): Boolean {
-//        while (sampleTime > SystemClock.elapsedRealtimeNanos() - startNanos) {
-//            delay(100)
-//        }
         return advance()
     }
 
@@ -285,7 +297,7 @@ class AudioDecoder {
         for (i in 0 until trackCount) {
             trackFormat = getTrackFormat(i)
             mime = trackFormat.getString(MediaFormat.KEY_MIME)
-            if (!TextUtils.isEmpty(mime) && mime!!.startsWith("audio")) {
+            if (!TextUtils.isEmpty(mime) && mime!!.startsWith("audio/")) {
                 audioTrackIndex = i
                 break
             }
@@ -293,36 +305,9 @@ class AudioDecoder {
         if (audioTrackIndex == -1)
             throw AudioDecoderException(ERROR_CODE_NO_AUDIO_TRACK, "没有找到音频流")
 
+        Log.d(TAG, "tf: $trackFormat")
+
         selectTrack(audioTrackIndex)
         return trackFormat!!
-    }
-
-    private fun MediaFormat.compatOpus(sampleRate: Int) {
-        //Log.d(TAG, ByteString.of(trackFormat.getByteBuffer("csd-0")).hex());
-        val buf = okio.Buffer()
-        // Magic Signature：固定头，占8个字节，为字符串OpusHead
-        buf.write("OpusHead".toByteArray(StandardCharsets.UTF_8))
-        // Version：版本号，占1字节，固定为0x01
-        buf.writeByte(1)
-        // Channel Count：通道数，占1字节，根据音频流通道自行设置，如0x02
-        buf.writeByte(1)
-        // Pre-skip：回放的时候从解码器中丢弃的samples数量，占2字节，为小端模式，默认设置0x00,
-        buf.writeShortLe(0)
-        // Input Sample Rate (Hz)：音频流的Sample Rate，占4字节，为小端模式，根据实际情况自行设置
-        buf.writeIntLe(sampleRate)
-        //Output Gain：输出增益，占2字节，为小端模式，没有用到默认设置0x00, 0x00就好
-        buf.writeShortLe(0)
-        // Channel Mapping Family：通道映射系列，占1字节，默认设置0x00就好
-        buf.writeByte(0)
-        //Channel Mapping Table：可选参数，上面的Family默认设置0x00的时候可忽略
-        val csd1bytes = byteArrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
-        val csd2bytes = byteArrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
-        val hd: ByteString = buf.readByteString()
-        val csd0: ByteBuffer = ByteBuffer.wrap(hd.toByteArray())
-        setByteBuffer("csd-0", csd0)
-        val csd1: ByteBuffer = ByteBuffer.wrap(csd1bytes)
-        setByteBuffer("csd-1", csd1)
-        val csd2: ByteBuffer = ByteBuffer.wrap(csd2bytes)
-        setByteBuffer("csd-2", csd2)
     }
 }

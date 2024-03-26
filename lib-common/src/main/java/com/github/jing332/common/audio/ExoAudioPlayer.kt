@@ -15,7 +15,6 @@ import com.github.jing332.common.audio.ExoPlayerHelper.createMediaSourceFromInpu
 import kotlinx.coroutines.*
 import java.io.InputStream
 
-
 class ExoAudioPlayer(val context: Context) {
     companion object {
         const val TAG = "AudioPlayer"

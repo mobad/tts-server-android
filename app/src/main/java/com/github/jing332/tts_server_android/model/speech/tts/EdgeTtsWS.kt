@@ -3,7 +3,8 @@ package com.github.jing332.tts_server_android.model.speech.tts
 import android.util.Log
 import cn.hutool.core.lang.UUID
 import com.drake.net.utils.withIO
-import com.github.jing332.script_engine.core.type.ws.internal.WebSocketException
+import com.github.jing332.tts_server_android.conf.SystemTtsConfig
+import com.github.jing332.tts_server_android.model.rhino.core.type.ws.internal.WebSocketException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -48,7 +49,11 @@ class EdgeTtsWS : WebSocketListener() {
 
     private fun connect(req: Request) {
         connectStatus = Status.Connecting
-        val client = OkHttpClient.Builder().writeTimeout(5, TimeUnit.SECONDS).build()
+        val client = OkHttpClient.Builder()
+            .connectTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
+            .writeTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
+            .build()
         ws = client.newWebSocket(req, this)
     }
 
@@ -58,7 +63,7 @@ class EdgeTtsWS : WebSocketListener() {
             header("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
             header(
                 "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.66 Safari/537.36 Edg/103.0.1264.44"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0"
             )
         }.build()
 
@@ -172,8 +177,7 @@ class EdgeTtsWS : WebSocketListener() {
     }
 
     private fun xmlEscape(s: String): String {
-        return s.replace("'", "&apos;").replace("\"", "&quot;").replace("<", "&lt;")
-            .replace(">", "&gt;").replace("&", "&amp;").replace("/", "").replace("\\", "")
+        return s.replace("&", "&amp;").replace(">", "&gt;").replace("<", "&lt;")
     }
 
     override fun onOpen(webSocket: WebSocket, response: Response) {

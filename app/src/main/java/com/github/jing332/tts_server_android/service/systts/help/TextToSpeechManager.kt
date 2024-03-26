@@ -1,5 +1,6 @@
 package com.github.jing332.tts_server_android.service.systts.help
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -7,6 +8,10 @@ import android.util.Log
 import com.github.jing332.common.audio.AudioDecoder.Companion.readPcmChunk
 import com.github.jing332.common.utils.longToast
 import com.github.jing332.common.utils.toast
+import androidx.annotation.OptIn
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
 import com.github.jing332.tts_server_android.R
 import com.github.jing332.tts_server_android.conf.SysTtsConfig
 import com.github.jing332.tts_server_android.constant.AppPattern
@@ -32,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.nio.ByteBuffer
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 import kotlin.system.measureTimeMillis
@@ -410,7 +416,8 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
         isSynthesizing = false
     }
 
-    private suspend fun AudioData<ITextToSpeechEngine>.receiver(
+    @SuppressLint("WrongConstant")
+    @OptIn(UnstableApi::class) private suspend fun AudioData<ITextToSpeechEngine>.receiver(
         sysRate: Int,
         sysPitch: Int,
         audioFormat: BaseAudioFormat,
@@ -423,26 +430,58 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
 
             val srcSampleRate = txtTts.tts.audioFormat.sampleRate
             val targetSampleRate = audioFormat.sampleRate
+            val af = txtTts.tts.audioFormat
 
+            val silenceSkip =
+                SilenceSkippingAudioProcessor(
+                    SilenceSkippingAudioProcessor.DEFAULT_MINIMUM_SILENCE_DURATION_US,
+                    SilenceSkippingAudioProcessor.DEFAULT_SILENCE_RETENTION_RATIO,
+                    SilenceSkippingAudioProcessor.DEFAULT_MAX_SILENCE_TO_KEEP_DURATION_US,
+                    SilenceSkippingAudioProcessor.DEFAULT_MIN_VOLUME_TO_KEEP_PERCENTAGE,
+                    SilenceSkippingAudioProcessor.DEFAULT_SILENCE_THRESHOLD_LEVEL
+                )
+            silenceSkip.setEnabled(true)
+            silenceSkip.configure(AudioProcessor.AudioFormat(af.sampleRate, 1, af.bitRate))
+            silenceSkip.flush()
 
-            val sonic =
+            val sonic: Sonic? =
                 if (audioParams.isDefaultValue && srcSampleRate == targetSampleRate) null
-                else com.github.jing332.common.audio.Sonic(txtTts.tts.audioFormat.sampleRate, 1)
+                else Sonic(af.sampleRate, 1).apply {
+                    volume = audioParams.volume
+                    speed = audioParams.speed
+                    pitch = audioParams.pitch
+                    rate = srcSampleRate.toFloat() / targetSampleRate.toFloat() }
+
             txtTts.playAudio(
                 sysRate, sysPitch, data.audio,
-                onDone = { data.done.invoke() })
+                onDone = {
+                    silenceSkip.queueEndOfStream()
+                    val outBuf = silenceSkip.output
+                    val out = ByteArray(outBuf.remaining())
+                    outBuf.get(out);
+                    if (sonic != null) {
+                        sonic.writeBytesToStream(out, out.size)
+                        onPcmAudio.invoke(sonic.readBytesFromStream(sonic.samplesAvailable()))
+                    } else {
+                        onPcmAudio.invoke(out)
+                    }
+                    data.done.invoke()
+                })
             { pcmAudio ->
-                if (sonic == null) onPcmAudio.invoke(pcmAudio)
-                else {
-                    sonic.volume = audioParams.volume
-                    sonic.speed = audioParams.speed
-                    sonic.pitch = audioParams.pitch
-                    sonic.rate = srcSampleRate.toFloat() / targetSampleRate.toFloat()
-
-                    sonic.writeBytesToStream(pcmAudio, pcmAudio.size)
-                    onPcmAudio.invoke(sonic.readBytesFromStream(sonic.samplesAvailable()))
+                val buffer = ByteBuffer.wrap(pcmAudio)
+                while (buffer.hasRemaining()) {
+                    silenceSkip.queueInput(buffer)
+                    val outBuf = silenceSkip.output
+                    val out = ByteArray(outBuf.remaining())
+                    outBuf.get(out);
+                    if (sonic == null) onPcmAudio.invoke(out)
+                    else {
+                        sonic.writeBytesToStream(out, out.size)
+                        onPcmAudio.invoke(sonic.readBytesFromStream(sonic.samplesAvailable()))
+                    }
                 }
             }
+
             listener?.onPlayFinished(txtTts.text, txtTts.tts)
         }.onFailure {
             listener?.onError(TtsManagerException(cause = it, message = it.message))
