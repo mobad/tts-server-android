@@ -3,6 +3,7 @@ package com.github.jing332.tts_server_android.model.speech.tts
 import android.util.Log
 import cn.hutool.core.lang.UUID
 import com.drake.net.utils.withIO
+import com.github.jing332.tts_server_android.conf.SystemTtsConfig
 import com.github.jing332.tts_server_android.model.rhino.core.type.ws.internal.WebSocketException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
@@ -48,7 +49,7 @@ class EdgeTtsWS : WebSocketListener() {
 
     private fun connect(req: Request) {
         connectStatus = Status.Connecting
-        val client = OkHttpClient.Builder().writeTimeout(5, TimeUnit.SECONDS).build()
+        val client = OkHttpClient.Builder().writeTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS).build()
         ws = client.newWebSocket(req, this)
     }
 

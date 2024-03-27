@@ -6,7 +6,12 @@ import androidx.annotation.FloatRange
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
 import androidx.media3.exoplayer.source.MediaSource
 import com.drake.net.utils.runMain
 import com.drake.net.utils.withMain
@@ -15,7 +20,7 @@ import com.github.jing332.tts_server_android.help.audio.ExoPlayerHelper.createMe
 import kotlinx.coroutines.*
 import java.io.InputStream
 
-
+@SuppressLint("UnsafeOptInUsageError")
 class ExoAudioPlayer(val context: Context) {
     companion object {
         const val TAG = "AudioPlayer"
@@ -29,7 +34,31 @@ class ExoAudioPlayer(val context: Context) {
 
     // APP内音频播放器 必须在主线程调用
     private val exoPlayer by lazy {
-        ExoPlayer.Builder(context).build().apply {
+        val rendererFactory = object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink? {
+                return DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setAudioProcessorChain(
+                        DefaultAudioSink.DefaultAudioProcessorChain(
+                            arrayOf(),
+                            SilenceSkippingAudioProcessor(
+                                50_000L,
+                                SilenceSkippingAudioProcessor.DEFAULT_PADDING_SILENCE_US,
+                                SilenceSkippingAudioProcessor.DEFAULT_SILENCE_THRESHOLD_LEVEL
+                            ),
+                            SonicAudioProcessor()
+                        )
+                    )
+                    .build()
+            }
+        }.apply { forceEnableMediaCodecAsynchronousQueueing() }
+
+        ExoPlayer.Builder(context, rendererFactory).setSkipSilenceEnabled(true).build().apply {
             playWhenReady = true
             addListener(object : Player.Listener {
                 @SuppressLint("SwitchIntDef")

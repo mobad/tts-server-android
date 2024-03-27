@@ -2,12 +2,17 @@ package com.github.jing332.tts_server_android.help.audio.exo
 
 import android.annotation.SuppressLint
 import android.content.Context
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
+import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor.DEFAULT_PADDING_SILENCE_US
+import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor.DEFAULT_SILENCE_THRESHOLD_LEVEL
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.MediaSource
 import com.drake.net.utils.withMain
 import com.github.jing332.tts_server_android.help.audio.AudioDecoderException
@@ -35,7 +40,7 @@ class ExoAudioDecoder(val context: Context) {
             ): AudioSink? {
                 return DecoderAudioSink { callback?.onReadPcmAudio(it) }
             }
-        }
+        }.apply { forceEnableMediaCodecAsynchronousQueueing() }
 
         ExoPlayer.Builder(context, rendererFactory).build().apply {
             addListener(object : Player.Listener {
