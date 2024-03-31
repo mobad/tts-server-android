@@ -19,8 +19,10 @@ class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSin
     private var timeUs: Long = 0L
     private var skippingAudioProcessor =
         SilenceSkippingAudioProcessor(
-            50_000L,
-            SilenceSkippingAudioProcessor.DEFAULT_PADDING_SILENCE_US,
+            SilenceSkippingAudioProcessor.DEFAULT_MINIMUM_SILENCE_DURATION_US,
+            SilenceSkippingAudioProcessor.DEFAULT_SILENCE_RETENTION_RATIO,
+            SilenceSkippingAudioProcessor.DEFAULT_MAX_SILENCE_TO_KEEP_DURATION_US,
+            SilenceSkippingAudioProcessor.DEFAULT_MIN_VOLUME_TO_KEEP_PERCENTAGE,
             SilenceSkippingAudioProcessor.DEFAULT_SILENCE_THRESHOLD_LEVEL
         )
 
