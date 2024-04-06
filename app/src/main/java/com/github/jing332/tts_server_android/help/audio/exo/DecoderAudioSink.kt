@@ -79,12 +79,23 @@ class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSin
 
     override fun playToEndOfStream() {
         skippingAudioProcessor.queueEndOfStream()
-        onPcmBuffer.invoke(skippingAudioProcessor.output)
+        while (!skippingAudioProcessor.isEnded) {
+            val outBuf = skippingAudioProcessor.output
+            if (outBuf.hasRemaining()) {
+                onPcmBuffer.invoke(outBuf)
+            }
+            skippingAudioProcessor.queueEndOfStream()
+        }
     }
 
-    override fun isEnded(): Boolean = true
+    override fun isEnded(): Boolean {
+        return skippingAudioProcessor.isEnded
+    }
 
-    override fun hasPendingData(): Boolean = true
+    override fun hasPendingData(): Boolean
+    {
+        return !skippingAudioProcessor.isEnded
+    }
 
     override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {
 
@@ -129,6 +140,7 @@ class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSin
     }
 
     override fun flush() {
+        timeUs = 0
         skippingAudioProcessor.flush()
     }
 
