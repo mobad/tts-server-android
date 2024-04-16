@@ -12,12 +12,10 @@ import com.github.jing332.tts_server_android.help.audio.AudioDecoderException.Co
 import com.github.jing332.tts_server_android.utils.GcManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
-import java.nio.charset.StandardCharsets
 import kotlin.coroutines.coroutineContext
 
 
@@ -167,22 +165,6 @@ class AudioDecoder {
     ) {
         val mediaExtractor = MediaExtractor()
         try {
-            val bytes = ByteArray(15)
-            val len = ins.read(bytes)
-
-            if (len == -1) throw AudioDecoderException(message = "读取音频流前15字节失败: len == -1")
-            if (bytes.decodeToString().endsWith("WAVEfmt")) {
-                ins.buffered().use { buffered ->
-                    buffered.skip(29)
-                    buffered.readPcmChunk { pcmData ->
-                        onRead.invoke(pcmData)
-                    }
-
-                    buffered.close()
-                }
-                return
-            }
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
                 mediaExtractor.setDataSource(InputStreamMediaDataSource(ins))
             else
@@ -210,9 +192,6 @@ class AudioDecoder {
     ) {
         val trackFormat = mediaExtractor.selectAudioTrack()
         val mime = trackFormat.mime
-
-        //opus的音频必须设置这个才能正确的解码
-        if ("audio/opus" == mime) trackFormat.compatOpus(sampleRate)
 
         //创建解码器
         val mediaCodec = getMediaCodec(mime, trackFormat)
@@ -269,9 +248,6 @@ class AudioDecoder {
 
     @Suppress("UNUSED_PARAMETER")
     private fun MediaExtractor.nextSample(startNanos: Long): Boolean {
-//        while (sampleTime > SystemClock.elapsedRealtimeNanos() - startNanos) {
-//            delay(100)
-//        }
         return advance()
     }
 
@@ -296,34 +272,5 @@ class AudioDecoder {
 
         selectTrack(audioTrackIndex)
         return trackFormat!!
-    }
-
-    private fun MediaFormat.compatOpus(sampleRate: Int) {
-        //Log.d(TAG, ByteString.of(trackFormat.getByteBuffer("csd-0")).hex());
-        val buf = okio.Buffer()
-        // Magic Signature：固定头，占8个字节，为字符串OpusHead
-        buf.write("OpusHead".toByteArray(StandardCharsets.UTF_8))
-        // Version：版本号，占1字节，固定为0x01
-        buf.writeByte(1)
-        // Channel Count：通道数，占1字节，根据音频流通道自行设置，如0x02
-        buf.writeByte(1)
-        // Pre-skip：回放的时候从解码器中丢弃的samples数量，占2字节，为小端模式，默认设置0x00,
-        buf.writeShortLe(0)
-        // Input Sample Rate (Hz)：音频流的Sample Rate，占4字节，为小端模式，根据实际情况自行设置
-        buf.writeIntLe(sampleRate)
-        //Output Gain：输出增益，占2字节，为小端模式，没有用到默认设置0x00, 0x00就好
-        buf.writeShortLe(0)
-        // Channel Mapping Family：通道映射系列，占1字节，默认设置0x00就好
-        buf.writeByte(0)
-        //Channel Mapping Table：可选参数，上面的Family默认设置0x00的时候可忽略
-        val csd1bytes = byteArrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
-        val csd2bytes = byteArrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
-        val hd: ByteString = buf.readByteString()
-        val csd0: ByteBuffer = ByteBuffer.wrap(hd.toByteArray())
-        setByteBuffer("csd-0", csd0)
-        val csd1: ByteBuffer = ByteBuffer.wrap(csd1bytes)
-        setByteBuffer("csd-1", csd1)
-        val csd2: ByteBuffer = ByteBuffer.wrap(csd2bytes)
-        setByteBuffer("csd-2", csd2)
     }
 }
