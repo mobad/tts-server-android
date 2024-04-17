@@ -20,7 +20,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import java.io.InputStream
 
-@SuppressLint("UnsafeOptInUsageError")
 class ExoAudioPlayer(val context: Context) {
     companion object {
         const val TAG = "AudioPlayer"
@@ -34,7 +33,7 @@ class ExoAudioPlayer(val context: Context) {
 
     // APP内音频播放器 必须在主线程调用
     private val exoPlayer by lazy {
-        ExoPlayer.Builder(context).setSkipSilenceEnabled(true).build().apply {
+        ExoPlayer.Builder(context).build().apply {
             playWhenReady = true
             addListener(object : Player.Listener {
                 @SuppressLint("SwitchIntDef")

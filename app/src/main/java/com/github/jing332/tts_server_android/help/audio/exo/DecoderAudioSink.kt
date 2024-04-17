@@ -4,11 +4,9 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.AuxEffectInfo
 import androidx.media3.common.Format
 import androidx.media3.common.PlaybackParameters
-import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.AudioSink.SINK_FORMAT_SUPPORTED_WITH_TRANSCODING
-import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
 import java.nio.ByteBuffer
 
 @UnstableApi
@@ -17,14 +15,6 @@ import java.nio.ByteBuffer
  */
 class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSink {
     private var timeUs: Long = 0L
-    private var skippingAudioProcessor =
-        SilenceSkippingAudioProcessor(
-            SilenceSkippingAudioProcessor.DEFAULT_MINIMUM_SILENCE_DURATION_US,
-            SilenceSkippingAudioProcessor.DEFAULT_SILENCE_RETENTION_RATIO,
-            SilenceSkippingAudioProcessor.DEFAULT_MAX_SILENCE_TO_KEEP_DURATION_US,
-            SilenceSkippingAudioProcessor.DEFAULT_MIN_VOLUME_TO_KEEP_PERCENTAGE,
-            SilenceSkippingAudioProcessor.DEFAULT_SILENCE_THRESHOLD_LEVEL
-        )
 
     companion object {
         const val TAG = "DecoderAudioSink"
@@ -46,9 +36,6 @@ class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSin
         specifiedBufferSize: Int,
         outputChannels: IntArray?
     ) {
-        skippingAudioProcessor.setEnabled(true)
-        skippingAudioProcessor.configure(AudioProcessor.AudioFormat(inputFormat))
-        skippingAudioProcessor.flush()
     }
 
     override fun play() {
@@ -63,39 +50,18 @@ class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSin
         presentationTimeUs: Long,
         encodedAccessUnitCount: Int
     ): Boolean {
-        while (!skippingAudioProcessor.isEnded) {
-            val outBuf = skippingAudioProcessor.output
-            if (outBuf.hasRemaining()) {
-                onPcmBuffer.invoke(outBuf)
-            }
-            if (!buffer.hasRemaining()) {
-                break
-            }
-            skippingAudioProcessor.queueInput(buffer)
-        }
+        onPcmBuffer.invoke(buffer)
         timeUs += presentationTimeUs
         return true
     }
 
     override fun playToEndOfStream() {
-        skippingAudioProcessor.queueEndOfStream()
-        while (!skippingAudioProcessor.isEnded) {
-            val outBuf = skippingAudioProcessor.output
-            if (outBuf.hasRemaining()) {
-                onPcmBuffer.invoke(outBuf)
-            }
-            skippingAudioProcessor.queueEndOfStream()
-        }
+
     }
 
-    override fun isEnded(): Boolean {
-        return skippingAudioProcessor.isEnded
-    }
+    override fun isEnded(): Boolean = true
 
-    override fun hasPendingData(): Boolean
-    {
-        return !skippingAudioProcessor.isEnded
-    }
+    override fun hasPendingData(): Boolean = true
 
     override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {
 
@@ -108,7 +74,7 @@ class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSin
 
     }
 
-    override fun getSkipSilenceEnabled(): Boolean = true
+    override fun getSkipSilenceEnabled(): Boolean = false
 
     override fun setAudioAttributes(audioAttributes: AudioAttributes) {
 
@@ -137,15 +103,16 @@ class DecoderAudioSink(private val onPcmBuffer: (ByteBuffer) -> Unit) : AudioSin
     }
 
     override fun pause() {
+
     }
 
     override fun flush() {
-        timeUs = 0
-        skippingAudioProcessor.flush()
+
     }
 
+
     override fun reset() {
-        flush()
-        skippingAudioProcessor.reset()
+
+
     }
 }

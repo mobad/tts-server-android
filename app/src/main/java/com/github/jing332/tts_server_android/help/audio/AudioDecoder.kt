@@ -2,9 +2,10 @@ package com.github.jing332.tts_server_android.help.audio
 
 import android.media.MediaCodec
 import android.media.MediaCodec.BufferInfo
+import android.media.MediaCodecList
+import android.media.MediaCodecList.ALL_CODECS
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.os.Build
 import android.os.SystemClock
 import android.text.TextUtils
 import android.util.Log
@@ -12,7 +13,6 @@ import com.github.jing332.tts_server_android.help.audio.AudioDecoderException.Co
 import com.github.jing332.tts_server_android.utils.GcManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import okio.ByteString.Companion.toByteString
 import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -62,12 +62,7 @@ class AudioDecoder {
         private fun getFormats(srcData: ByteArray): List<MediaFormat> {
             kotlin.runCatching {
                 val mediaExtractor = MediaExtractor()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                    mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
-                else
-                    mediaExtractor.setDataSource(
-                        "data:" + "" + ";base64," + srcData.toByteString().base64()
-                    )
+                mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
 
                 val formats = mutableListOf<MediaFormat>()
                 for (i in 0 until mediaExtractor.trackCount) {
@@ -107,7 +102,8 @@ class AudioDecoder {
                 GcManager.doGC()
             }
             try {
-                mediaCodec = MediaCodec.createDecoderByType(mime)
+                val codec = MediaCodecList(ALL_CODECS).findDecoderForFormat(mediaFormat)
+                mediaCodec = MediaCodec.createByCodecName(codec)
                 oldMime = mime
             } catch (ioException: IOException) {
                 //设备无法创建，直接抛出
@@ -116,6 +112,7 @@ class AudioDecoder {
             }
         }
         mediaCodec!!.reset()
+        mediaFormat.setInteger(MediaFormat.KEY_PRIORITY, 0)
         mediaCodec!!.configure(mediaFormat, null, null, 0)
         return mediaCodec as MediaCodec
     }
@@ -135,12 +132,7 @@ class AudioDecoder {
                 onRead.invoke(data)
                 return
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
-            else
-                mediaExtractor.setDataSource(
-                    "data:" + currentMime + ";base64," + srcData.toByteString().base64()
-                )
+            mediaExtractor.setDataSource(ByteArrayMediaDataSource(srcData))
 
             decodeInternal(mediaExtractor, sampleRate) {
                 onRead.invoke(it)
@@ -165,13 +157,7 @@ class AudioDecoder {
     ) {
         val mediaExtractor = MediaExtractor()
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                mediaExtractor.setDataSource(InputStreamMediaDataSource(ins))
-            else
-                throw AudioDecoderException(
-                    AudioDecoderException.ERROR_CODE_NOT_SUPPORT_A5,
-                    "音频流解码器不支持 Android 5"
-                )
+            mediaExtractor.setDataSource(InputStreamMediaDataSource(ins))
 
             decodeInternal(mediaExtractor, sampleRate, timeoutUs) {
                 onRead.invoke(it)
@@ -205,43 +191,49 @@ class AudioDecoder {
             val inputIndex = mediaCodec.dequeueInputBuffer(timeoutUs)
             if (inputIndex < 0) break
 
-            bufferInfo.presentationTimeUs = mediaExtractor.sampleTime
-
             inputBuffer = mediaCodec.getInputBuffer(inputIndex)
-            if (inputBuffer != null) {
-                inputBuffer.clear()
-            } else
+            if (inputBuffer == null) {
                 continue
+            }
 
             //从流中读取的采样数量
             val sampleSize = mediaExtractor.readSampleData(inputBuffer, 0)
             if (sampleSize > 0) {
-                bufferInfo.size = sampleSize
                 //入队解码
-                mediaCodec.queueInputBuffer(inputIndex, 0, sampleSize, 0, 0)
+                mediaCodec.queueInputBuffer(inputIndex, 0, sampleSize, mediaExtractor.sampleTime, 0)
                 //移动到下一个采样点
                 if (!mediaExtractor.nextSample(startNanos)) {
-                    Log.d(TAG, "nextSample(): 已到达流末尾EOF")
+                    Log.e(TAG, "nextSample(): 已到达流末尾EOF")
                 }
-            } else
-                break
+            } else {
+                mediaCodec.queueInputBuffer(
+                    inputIndex,
+                    0,
+                    0,
+                    0,
+                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                )
+            }
 
-            //取解码后的数据
-            var outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+            //取解码后的数据/
+            val outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                break
+            }
+
             //不一定能一次取完，所以要循环取
             var outputBuffer: ByteBuffer?
             val pcmData = ByteArray(bufferInfo.size)
 
-            while (coroutineContext.isActive && outputIndex >= 0) {
+            if (outputIndex >= 0) {
                 outputBuffer = mediaCodec.getOutputBuffer(outputIndex)
                 if (outputBuffer != null) {
                     outputBuffer.get(pcmData)
                     outputBuffer.clear() //用完后清空，复用
                 }
 
-                onRead.invoke(pcmData)
                 mediaCodec.releaseOutputBuffer(/* index = */ outputIndex, /* render = */ false)
-                outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+                onRead.invoke(pcmData)
             }
         }
     }
@@ -262,13 +254,15 @@ class AudioDecoder {
         for (i in 0 until trackCount) {
             trackFormat = getTrackFormat(i)
             mime = trackFormat.getString(MediaFormat.KEY_MIME)
-            if (!TextUtils.isEmpty(mime) && mime!!.startsWith("audio")) {
+            if (!TextUtils.isEmpty(mime) && mime!!.startsWith("audio/")) {
                 audioTrackIndex = i
                 break
             }
         }
         if (audioTrackIndex == -1)
             throw AudioDecoderException(ERROR_CODE_NO_AUDIO_TRACK, "没有找到音频流")
+
+        Log.e(TAG, "tf: $trackFormat")
 
         selectTrack(audioTrackIndex)
         return trackFormat!!
