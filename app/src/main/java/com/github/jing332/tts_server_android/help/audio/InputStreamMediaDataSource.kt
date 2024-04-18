@@ -26,7 +26,7 @@ class InputStreamMediaDataSource(private val inputStream: InputStream) : MediaDa
     }
 
     override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
-        Log.e(TAG, "readAt: pos=$position, offset=$offset, size=$size")
+        Log.d(TAG, "readAt: pos=$position, offset=$offset, size=$size")
         kotlin.runCatching {
             val newSize = position.toInt() + size
             if (!finishedRead && newSize > cache.size) {
@@ -34,7 +34,7 @@ class InputStreamMediaDataSource(private val inputStream: InputStream) : MediaDa
             }
             while (!finishedRead && limit <= position) {
                 val readSize = bufferedInputStream.read(cache, limit.toInt(), size).apply {
-                    Log.e(TAG, "readAt: readLen=$this")
+                    Log.d(TAG, "readAt: readLen=$this")
                 }
                 if (readSize == -1) {
                     finishedRead = true
@@ -43,7 +43,7 @@ class InputStreamMediaDataSource(private val inputStream: InputStream) : MediaDa
                 }
             }
             val bytesToRead = max(min(limit, position + size) - position, -1)
-            Log.e(TAG, "readAt: bytesToRead=$bytesToRead")
+            Log.d(TAG, "readAt: bytesToRead=$bytesToRead")
             if (bytesToRead > 0) {
                 cache.copyInto(buffer, offset, position.toInt(), position.toInt() + bytesToRead.toInt())
             } else {
@@ -53,7 +53,7 @@ class InputStreamMediaDataSource(private val inputStream: InputStream) : MediaDa
             return bytesToRead.toInt()
 
         }.onFailure {
-            Log.e(TAG, it.stackTraceToString())
+            Log.d(TAG, it.stackTraceToString())
         }
         return -1
     }

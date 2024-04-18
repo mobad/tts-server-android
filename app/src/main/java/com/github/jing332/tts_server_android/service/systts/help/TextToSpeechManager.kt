@@ -453,17 +453,29 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
             silenceSkip.configure(AudioProcessor.AudioFormat(af.sampleRate, 1, af.bitRate))
             silenceSkip.flush()
 
-            val sonic: Sonic? = null
-//                if (audioParams.isDefaultValue && srcSampleRate == targetSampleRate) null
-//                else Sonic(af.sampleRate, 1).apply {
-//                    volume = audioParams.volume
-//                    speed = audioParams.speed
-//                    pitch = audioParams.pitch
-//                    rate = srcSampleRate.toFloat() / targetSampleRate.toFloat() }
+            val sonic: Sonic? =
+                if (audioParams.isDefaultValue && srcSampleRate == targetSampleRate) null
+                else Sonic(af.sampleRate, 1).apply {
+                    volume = audioParams.volume
+                    speed = audioParams.speed
+                    pitch = audioParams.pitch
+                    rate = srcSampleRate.toFloat() / targetSampleRate.toFloat() }
 
             txtTts.playAudio(
                 sysRate, sysPitch, data.audio,
-                onDone = { data.done.invoke() })
+                onDone = {
+                    silenceSkip.queueEndOfStream()
+                    val outBuf = silenceSkip.output
+                    val out = ByteArray(outBuf.remaining())
+                    outBuf.get(out);
+                    if (sonic != null) {
+                        sonic.writeBytesToStream(out, out.size)
+                        onPcmAudio.invoke(sonic.readBytesFromStream(sonic.samplesAvailable()))
+                    } else {
+                        onPcmAudio.invoke(out)
+                    }
+                    data.done.invoke()
+                })
             { pcmAudio ->
                 val buffer = ByteBuffer.wrap(pcmAudio)
                 while (buffer.hasRemaining()) {
@@ -478,16 +490,7 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
                     }
                 }
             }
-            silenceSkip.queueEndOfStream()
-            val outBuf = silenceSkip.output
-            val out = ByteArray(outBuf.remaining())
-            outBuf.get(out);
-            if (sonic != null) {
-                sonic.writeBytesToStream(out, out.size)
-                onPcmAudio.invoke(sonic.readBytesFromStream(sonic.samplesAvailable()))
-            } else {
-                onPcmAudio.invoke(out)
-            }
+
             listener?.onPlayFinished(txtTts.text, txtTts.tts)
         }.onFailure {
             listener?.onError(TtsManagerException(cause = it, message = it.message))

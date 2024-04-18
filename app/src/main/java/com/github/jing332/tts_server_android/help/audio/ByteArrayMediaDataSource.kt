@@ -9,7 +9,7 @@ class ByteArrayMediaDataSource(var data: ByteArray) : MediaDataSource() {
         const val TAG = "ByteArrayMediaDataSource"
     }
     override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
-        Log.e(TAG, "readAt: pos=$position, offset=$offset, size=$size")
+        Log.d(TAG, "readAt: pos=$position, offset=$offset, size=$size")
         if (position >= data.size) return -1
 
         val endPosition = (position + size).toInt()

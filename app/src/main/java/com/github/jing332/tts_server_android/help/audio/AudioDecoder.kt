@@ -157,7 +157,23 @@ class AudioDecoder {
     ) {
         val mediaExtractor = MediaExtractor()
         try {
-            mediaExtractor.setDataSource(InputStreamMediaDataSource(ins))
+            val stream = InputStreamMediaDataSource(ins)
+            val bytes = ByteArray(15)
+            val len = stream.readAt(0, bytes, 0,15)
+            if (len == -1) throw AudioDecoderException(message = "读取音频流前15字节失败: len == -1")
+            if (bytes.decodeToString().endsWith("WAVEfmt")) {
+                ins.buffered().use { buffered ->
+                    buffered.skip(29)
+                    buffered.readPcmChunk { pcmData ->
+                        onRead.invoke(pcmData)
+                    }
+
+                    buffered.close()
+                }
+                return
+            }
+
+            mediaExtractor.setDataSource(stream)
 
             decodeInternal(mediaExtractor, sampleRate, timeoutUs) {
                 onRead.invoke(it)
@@ -203,7 +219,7 @@ class AudioDecoder {
                 mediaCodec.queueInputBuffer(inputIndex, 0, sampleSize, mediaExtractor.sampleTime, 0)
                 //移动到下一个采样点
                 if (!mediaExtractor.nextSample(startNanos)) {
-                    Log.e(TAG, "nextSample(): 已到达流末尾EOF")
+                    Log.d(TAG, "nextSample(): 已到达流末尾EOF")
                 }
             } else {
                 mediaCodec.queueInputBuffer(
@@ -232,7 +248,7 @@ class AudioDecoder {
                     outputBuffer.clear() //用完后清空，复用
                 }
 
-                mediaCodec.releaseOutputBuffer(/* index = */ outputIndex, /* render = */ false)
+                mediaCodec.releaseOutputBuffer(outputIndex, false)
                 onRead.invoke(pcmData)
             }
         }
@@ -262,7 +278,7 @@ class AudioDecoder {
         if (audioTrackIndex == -1)
             throw AudioDecoderException(ERROR_CODE_NO_AUDIO_TRACK, "没有找到音频流")
 
-        Log.e(TAG, "tf: $trackFormat")
+        Log.d(TAG, "tf: $trackFormat")
 
         selectTrack(audioTrackIndex)
         return trackFormat!!
