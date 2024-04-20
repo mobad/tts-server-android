@@ -65,7 +65,7 @@ abstract class ITextToSpeechSynthesizer<T> {
         sysPitch: Int,
         onAudioAvailable: suspend (AudioData<T>) -> Unit
     ) {
-        val channel = Channel<AudioData<T>>(10)
+        val channel = Channel<AudioData<T>>(100)
         coroutineScope {
             launch(Dispatchers.IO) {
                 val textList = handleText(text)
