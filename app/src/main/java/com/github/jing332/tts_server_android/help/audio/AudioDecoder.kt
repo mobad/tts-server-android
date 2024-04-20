@@ -159,7 +159,7 @@ class AudioDecoder {
         try {
             val stream = InputStreamMediaDataSource(ins)
             val bytes = ByteArray(15)
-            val len = stream.readAt(0, bytes, 0,15)
+            val len = stream.readAt(0, bytes, 0, 15)
             if (len == -1) throw AudioDecoderException(message = "读取音频流前15字节失败: len == -1")
             if (bytes.decodeToString().endsWith("WAVEfmt")) {
                 ins.buffered().use { buffered ->
@@ -199,25 +199,41 @@ class AudioDecoder {
         val mediaCodec = getMediaCodec(mime, trackFormat)
         mediaCodec.start()
 
-        val bufferInfo = BufferInfo()
-        var inputBuffer: ByteBuffer?
-        val startNanos = SystemClock.elapsedRealtimeNanos()
-        while (coroutineContext.isActive) {
-            //获取可用的inputBuffer，输入参数-1代表一直等到，0代表不等待，10*1000代表10秒超时
-            val inputIndex = mediaCodec.dequeueInputBuffer(timeoutUs)
-            if (inputIndex < 0) break
+        var endOfInput = false
+        var endOfOutput = false
 
-            inputBuffer = mediaCodec.getInputBuffer(inputIndex)
-            if (inputBuffer == null) {
-                continue
+        while (coroutineContext.isActive && !endOfOutput) {
+            if (!endOfInput) {
+                endOfInput = handleInput(mediaCodec, mediaExtractor, timeoutUs)
             }
+
+            endOfOutput = handleOutput(mediaCodec, onRead, timeoutUs)
+        }
+    }
+
+    private fun handleInput(
+        mediaCodec: MediaCodec,
+        mediaExtractor: MediaExtractor,
+        timeoutUs: Long = 5000L
+    ): Boolean {
+        //获取可用的inputBuffer，输入参数-1代表一直等到，0代表不等待，10*1000代表10秒超时
+        val inputIndex = mediaCodec.dequeueInputBuffer(timeoutUs)
+        if (inputIndex >= 0) {
+            val inputBuffer = mediaCodec.getInputBuffer(inputIndex) ?: return false
 
             //从流中读取的采样数量
             val sampleSize = mediaExtractor.readSampleData(inputBuffer, 0)
-            if (sampleSize > 0) {
+            if (sampleSize >= 0) {
                 //入队解码
-                mediaCodec.queueInputBuffer(inputIndex, 0, sampleSize, mediaExtractor.sampleTime, 0)
+                mediaCodec.queueInputBuffer(
+                    inputIndex,
+                    0,
+                    sampleSize,
+                    mediaExtractor.sampleTime,
+                    mediaExtractor.sampleFlags
+                )
                 //移动到下一个采样点
+                val startNanos = SystemClock.elapsedRealtimeNanos()
                 if (!mediaExtractor.nextSample(startNanos)) {
                     Log.d(TAG, "nextSample(): 已到达流末尾EOF")
                 }
@@ -229,29 +245,41 @@ class AudioDecoder {
                     0,
                     MediaCodec.BUFFER_FLAG_END_OF_STREAM
                 )
-            }
-
-            //取解码后的数据/
-            val outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
-            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                break
-            }
-
-            //不一定能一次取完，所以要循环取
-            var outputBuffer: ByteBuffer?
-            val pcmData = ByteArray(bufferInfo.size)
-
-            if (outputIndex >= 0) {
-                outputBuffer = mediaCodec.getOutputBuffer(outputIndex)
-                if (outputBuffer != null) {
-                    outputBuffer.get(pcmData)
-                    outputBuffer.clear() //用完后清空，复用
-                }
-
-                mediaCodec.releaseOutputBuffer(outputIndex, false)
-                onRead.invoke(pcmData)
+                return true
             }
         }
+
+        return false
+    }
+
+    private suspend fun handleOutput(
+        mediaCodec: MediaCodec,
+        onRead: suspend (pcmData: ByteArray) -> Unit,
+        timeoutUs: Long = 5000L,
+    ): Boolean {
+        //取解码后的数据/
+        val bufferInfo = BufferInfo()
+        val outputIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+        if (outputIndex >= 0) {
+            //不一定能一次取完，所以要循环取
+            val outputBuffer = mediaCodec.getOutputBuffer(outputIndex)
+            if (outputBuffer != null) {
+                val pcmData = ByteArray(bufferInfo.size)
+                outputBuffer.get(pcmData)
+                outputBuffer.clear() //用完后清空，复用
+
+                // Should be before release to avoid overflow?
+                onRead.invoke(pcmData)
+            }
+
+            mediaCodec.releaseOutputBuffer(outputIndex, false)
+
+            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                return true
+            }
+        }
+
+        return false
     }
 
     @Suppress("UNUSED_PARAMETER")
