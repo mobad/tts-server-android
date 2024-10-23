@@ -1,6 +1,6 @@
 module tts-server-lib
 
-go 1.19
+go 1.22
 
 require (
 	github.com/jing332/tts-server-go v0.0.0-20230130020836-aed022548060

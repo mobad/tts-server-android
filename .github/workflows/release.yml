@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.20.3
+          go-version: 1.22
           cache-dependency-path: ${{ github.workspace }}/tts-server-lib
 
       - name: Build tts-server-lib
@@ -103,4 +103,4 @@ jobs:
           prerelease: false
           files: ${{env.outputs_dir}}/apk/${{ env.product }}/release/*.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}    
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
