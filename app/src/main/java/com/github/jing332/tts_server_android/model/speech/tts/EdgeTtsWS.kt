@@ -68,7 +68,7 @@ class EdgeTtsWS : WebSocketListener() {
 
         connect(req)
         while (isActive) {
-            delay(50)
+            delay(10)
             when (connectStatus) {
                 Status.Opened -> return@withIO true
                 is Status.Failure ->
