@@ -444,9 +444,9 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
             silenceSkip.configure(AudioProcessor.AudioFormat(af.sampleRate, 1, af.bitRate))
             silenceSkip.flush()
 
-            val sonic: Sonic? =
+            val sonic =
                 if (audioParams.isDefaultValue && srcSampleRate == targetSampleRate) null
-                else Sonic(af.sampleRate, 1).apply {
+                else  com.github.jing332.common.audio.Sonic(af.sampleRate, 1).apply {
                     volume = audioParams.volume
                     speed = audioParams.speed
                     pitch = audioParams.pitch
