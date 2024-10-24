@@ -52,6 +52,7 @@ class EdgeTtsWS : WebSocketListener() {
             .connectTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .writeTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
+            .pingInterval(20, TimeUnit.MILLISECONDS)
             .build()
         ws = client.newWebSocket(req, this)
     }
@@ -144,7 +145,7 @@ class EdgeTtsWS : WebSocketListener() {
     private fun sendSSML(ssml: String) {
         Log.d(TAG, "sendSSML: $ssml")
         val msg =
-            "Path: ssml\r\nX-RequestId: $uuid\r\nX-Timestamp: $currentISOTime\r\nContent-Type: application/ssml+xml\r\n\r\n$ssml"
+            "X-RequestId: $uuid\r\nContent-Type: application/ssml+xml\r\nX-Timestamp: $currentISOTime\r\nPath: ssml\r\n\r\n$ssml"
         ws.send(msg)
     }
 
@@ -191,6 +192,7 @@ class EdgeTtsWS : WebSocketListener() {
         connectStatus = Status.Closing(code, reason)
         outputStream?.close()
         outputStream = null
+        ws.close(1000, "close")
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -203,17 +205,21 @@ class EdgeTtsWS : WebSocketListener() {
         connectStatus = Status.Failure(t, response)
         outputStream?.close()
         outputStream = null
+        ws.cancel()
         waitJob?.cancel()
+        waitJob = null
     }
 
     override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
         Log.d(TAG, "onMessage: $bytes")
 
         val index = bytes.indexOf("Path:audio".toByteArray())
-        val data = bytes.substring(index + 12);
+        if (index != -1) {
+            val data = bytes.substring(index + 12);
 
-        outputStream?.write(data.toByteArray())
-        outputStream?.flush()
+            outputStream?.write(data.toByteArray())
+            outputStream?.flush()
+        }
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
