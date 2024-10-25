@@ -7,8 +7,6 @@ import com.github.jing332.tts_server_android.conf.SystemTtsConfig
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -52,7 +50,7 @@ class EdgeTtsWS : WebSocketListener() {
             .connectTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .writeTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
-            //.pingInterval(100, TimeUnit.MILLISECONDS)
+            //.pingInterval(150, TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true)
             .build()
         ws = client.newWebSocket(req, this)
@@ -69,20 +67,6 @@ class EdgeTtsWS : WebSocketListener() {
         }.build()
 
         connect(req)
-        while (isActive) {
-            delay(10)
-            when (connectStatus) {
-                Status.Opened -> return@withIO true
-                is Status.Failure ->
-                    (connectStatus as Status.Failure).apply {
-                        throw com.github.jing332.script_engine.core.type.ws.internal.WebSocketException(
-                            response
-                        ).initCause(t)
-                    }
-
-                else -> {}
-            }
-        }
 
         return@withIO connectStatus != Status.Connecting
     }
@@ -100,13 +84,13 @@ class EdgeTtsWS : WebSocketListener() {
     suspend fun getAudio(ssml: String, format: String): InputStream = coroutineScope {
         uuid = UUID.randomUUID().toString(true)
         outputStream = PipedOutputStream()
+        waitJob = launch { awaitCancellation() }.job
 
         if (connectStatus != Status.Opened) connectSync()
 
         sendConfig(format)
         sendSSML(ssml)
 
-        waitJob = launch { awaitCancellation() }.job
         waitJob?.join() // 等待响应: Path:turn.start
 
         if (outputStream == null) {
