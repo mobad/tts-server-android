@@ -325,10 +325,7 @@ class SystemTtsService : TextToSpeechService(), TextToSpeechManager.Listener {
                     }
 
                     builder.setContentTitle(title)
-                    startForegroundCompat(
-                        SystemNotificationConst.ID_SYSTEM_TTS,
-                        builder.build()
-                    )
+                    mNotificationManager.notify(SystemNotificationConst.ID_SYSTEM_TTS, builder.build())
                 }
             }
     }
