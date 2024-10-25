@@ -52,7 +52,8 @@ class EdgeTtsWS : WebSocketListener() {
             .connectTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .writeTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
-            .pingInterval(20, TimeUnit.MILLISECONDS)
+            .pingInterval(200, TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(true)
             .build()
         ws = client.newWebSocket(req, this)
     }
