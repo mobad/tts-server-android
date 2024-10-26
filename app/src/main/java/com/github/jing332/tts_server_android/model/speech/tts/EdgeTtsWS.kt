@@ -175,6 +175,7 @@ class EdgeTtsWS : WebSocketListener() {
         Log.d(TAG, "onClosing: $code $reason")
 
         connectStatus = Status.Closing(code, reason)
+        outputStream?.flush()
         outputStream?.close()
         outputStream = null
         ws.close(1000, "close")
@@ -188,6 +189,7 @@ class EdgeTtsWS : WebSocketListener() {
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         Log.w(TAG, "onFailure: $response", t)
         connectStatus = Status.Failure(t, response)
+        outputStream?.flush()
         outputStream?.close()
         outputStream = null
         ws.cancel()
@@ -212,6 +214,7 @@ class EdgeTtsWS : WebSocketListener() {
 
         if (text.contains("Path:turn.end")) {
             Log.d(TAG, "turn.end")
+            outputStream?.flush()
             outputStream?.close()
             outputStream = null
         } else if (text.contains("Path:turn.start")) {
