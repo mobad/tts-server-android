@@ -23,6 +23,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.Objects
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class EdgeTtsWS : WebSocketListener() {
     companion object {
@@ -73,7 +74,8 @@ class EdgeTtsWS : WebSocketListener() {
         return@withIO connectStatus != Status.Connecting
     }
 
-    private var outputStream: Pipe.SinkChannel? = null
+    private var sink: Pipe.SinkChannel? = null
+    private var gotCompleteAudio: AtomicBoolean = AtomicBoolean(false)
     suspend fun getAudio(
         text: String,
         voice: String,
@@ -86,8 +88,9 @@ class EdgeTtsWS : WebSocketListener() {
     suspend fun getAudio(ssml: String, format: String): InputStream = coroutineScope {
         uuid = UUID.randomUUID().toString(true)
         val pipe = Pipe.open()
-        outputStream = pipe.sink()
-        outputStream?.configureBlocking(true)
+        sink = pipe.sink()
+        sink?.configureBlocking(true)
+        gotCompleteAudio.set(false)
 
         waitJob = launch { awaitCancellation() }.job
 
@@ -98,7 +101,7 @@ class EdgeTtsWS : WebSocketListener() {
 
         waitJob?.join() // 等待响应: Path:turn.start
 
-        if (outputStream == null) {
+        if (sink == null) {
             when (connectStatus) {
                 is Status.Failure ->
                     (connectStatus as Status.Failure).apply {
@@ -120,7 +123,7 @@ class EdgeTtsWS : WebSocketListener() {
 
         val pipeSource = pipe.source()
         pipeSource.configureBlocking(true)
-        var inputStream = object : InputStream() {
+        val inputStream = object : InputStream() {
             private val source = pipeSource
             override fun read(): Int {
                 val b = ByteBuffer.allocate(0)
@@ -138,7 +141,12 @@ class EdgeTtsWS : WebSocketListener() {
                 val read = source.read(ByteBuffer.wrap(b, off, len))
                 return read
             }
-
+            override fun close() {
+                super.close()
+                if (!gotCompleteAudio.get()) {
+                    throw Exception("audio was not complete")
+                }
+            }
         }
 
         return@coroutineScope inputStream
@@ -203,8 +211,8 @@ class EdgeTtsWS : WebSocketListener() {
         Log.d(TAG, "onClosing: $code $reason")
 
         connectStatus = Status.Closing(code, reason)
-        outputStream?.close()
-        outputStream = null
+        sink?.close()
+        sink = null
         ws.close(1000, "close")
     }
 
@@ -216,8 +224,8 @@ class EdgeTtsWS : WebSocketListener() {
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         Log.w(TAG, "onFailure: $response", t)
         connectStatus = Status.Failure(t, response)
-        outputStream?.close()
-        outputStream = null
+        sink?.close()
+        sink = null
         ws.cancel()
         waitJob?.cancel()
         waitJob = null
@@ -230,7 +238,7 @@ class EdgeTtsWS : WebSocketListener() {
         if (index != -1) {
             val data = bytes.substring(index + 12);
 
-            outputStream?.write(data.asByteBuffer())
+            sink?.write(data.asByteBuffer())
         }
     }
 
@@ -239,8 +247,9 @@ class EdgeTtsWS : WebSocketListener() {
 
         if (text.contains("Path:turn.end")) {
             Log.d(TAG, "turn.end")
-            outputStream?.close()
-            outputStream = null
+            gotCompleteAudio.set(true)
+            sink?.close()
+            sink = null
         } else if (text.contains("Path:turn.start")) {
             waitJob?.cancel()
             waitJob = null
