@@ -522,9 +522,9 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
             listener?.onRequestSuccess(text, tts, -1, costTime, retryTimes)
             if (tts.audioFormat.isNeedDecode) {
                 if (SysTtsConfig.isInAppPlayAudio) {
-                    onDone.invoke()
                     audioResult.builtinPlayAudio(tts.audioPlayer)
                     audioResult.inputStream?.close()
+                    onDone.invoke()
                 } else {
                     try {
                         audioResult.decodeAudio { onPcmAudio.invoke(it) }
@@ -557,7 +557,6 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
             }
         } else { // 全部加载到内存
             val audio = audioResult.bytes
-            onDone.invoke()
             if (audio == null || audio.size < 48) return
 
             listener?.onRequestSuccess(text, tts, audio.size, costTime, retryTimes)
@@ -570,9 +569,13 @@ class TextToSpeechManager(val context: Context) : ITextToSpeechSynthesizer<IText
                         audioResult.decodeAudio { onPcmAudio.invoke(it) }
                     } catch (e: Exception) {
                         throw PlayException(tts = tts, cause = e, message = "音频解码失败")
+                    } finally {
+                        onDone.invoke()
                     }
-            } else
+            } else {
                 onPcmAudio.invoke(audio)
+                onDone.invoke()
+            }
         }
     }
 
