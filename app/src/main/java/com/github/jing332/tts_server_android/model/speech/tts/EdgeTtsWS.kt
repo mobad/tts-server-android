@@ -15,11 +15,13 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import java.io.IOException
 import java.io.InputStream
-import java.io.PipedInputStream
-import java.io.PipedOutputStream
+import java.nio.ByteBuffer
+import java.nio.channels.Pipe
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.Objects
 import java.util.concurrent.TimeUnit
 
 class EdgeTtsWS : WebSocketListener() {
@@ -71,7 +73,7 @@ class EdgeTtsWS : WebSocketListener() {
         return@withIO connectStatus != Status.Connecting
     }
 
-    private var outputStream: PipedOutputStream? = null
+    private var outputStream: Pipe.SinkChannel? = null
     suspend fun getAudio(
         text: String,
         voice: String,
@@ -83,7 +85,10 @@ class EdgeTtsWS : WebSocketListener() {
 
     suspend fun getAudio(ssml: String, format: String): InputStream = coroutineScope {
         uuid = UUID.randomUUID().toString(true)
-        outputStream = PipedOutputStream()
+        val pipe = Pipe.open()
+        outputStream = pipe.sink()
+        outputStream?.configureBlocking(true)
+
         waitJob = launch { awaitCancellation() }.job
 
         if (connectStatus != Status.Opened) connectSync()
@@ -113,7 +118,30 @@ class EdgeTtsWS : WebSocketListener() {
             }
         }
 
-        return@coroutineScope PipedInputStream(outputStream)
+        val pipeSource = pipe.source()
+        pipeSource.configureBlocking(true)
+        var inputStream = object : InputStream() {
+            private val source = pipeSource
+            override fun read(): Int {
+                val b = ByteBuffer.allocate(0)
+                val read = source.read(b)
+                return if (read > 0) b.get().toInt() else -1
+            }
+
+            @Throws(IOException::class)
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                Objects.checkFromIndexSize(off, len, b.size)
+                if (len == 0) {
+                    return 0
+                }
+
+                val read = source.read(ByteBuffer.wrap(b, off, len))
+                return read
+            }
+
+        }
+
+        return@coroutineScope inputStream
     }
 
     /**
@@ -175,7 +203,6 @@ class EdgeTtsWS : WebSocketListener() {
         Log.d(TAG, "onClosing: $code $reason")
 
         connectStatus = Status.Closing(code, reason)
-        outputStream?.flush()
         outputStream?.close()
         outputStream = null
         ws.close(1000, "close")
@@ -189,7 +216,6 @@ class EdgeTtsWS : WebSocketListener() {
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         Log.w(TAG, "onFailure: $response", t)
         connectStatus = Status.Failure(t, response)
-        outputStream?.flush()
         outputStream?.close()
         outputStream = null
         ws.cancel()
@@ -204,8 +230,7 @@ class EdgeTtsWS : WebSocketListener() {
         if (index != -1) {
             val data = bytes.substring(index + 12);
 
-            outputStream?.write(data.toByteArray())
-            outputStream?.flush()
+            outputStream?.write(data.asByteBuffer())
         }
     }
 
@@ -214,7 +239,6 @@ class EdgeTtsWS : WebSocketListener() {
 
         if (text.contains("Path:turn.end")) {
             Log.d(TAG, "turn.end")
-            outputStream?.flush()
             outputStream?.close()
             outputStream = null
         } else if (text.contains("Path:turn.start")) {
