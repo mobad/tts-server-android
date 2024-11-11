@@ -53,7 +53,7 @@ class EdgeTtsWS : WebSocketListener() {
             .connectTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .writeTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
-            //.pingInterval(150, TimeUnit.MILLISECONDS)
+            .pingInterval(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true)
             .build()
         ws = client.newWebSocket(req, this)
@@ -214,11 +214,17 @@ class EdgeTtsWS : WebSocketListener() {
         sink?.close()
         sink = null
         ws.close(1000, "close")
+        waitJob?.cancel()
+        waitJob = null
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
         connectStatus = Status.Closed
         Log.d(TAG, "onClosed: $code $reason")
+        sink?.close()
+        sink = null
+        waitJob?.cancel()
+        waitJob = null
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
