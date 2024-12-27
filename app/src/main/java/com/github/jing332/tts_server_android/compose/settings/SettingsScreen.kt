@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material.icons.filled.HideSource
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
@@ -23,10 +24,8 @@ import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SettingsBackupRestore
-import androidx.compose.material.icons.filled.StackedLineChart
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.filled.TextSnippet
 import androidx.compose.material.icons.filled.Waves
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DropdownMenuItem
@@ -211,6 +210,17 @@ fun SettingsScreen(drawerState: DrawerState) {
                 onCheckedChange = { autoCheck = it },
                 icon = {
                     Icon(Icons.Default.ArrowCircleUp, contentDescription = null)
+                }
+            )
+
+            var excludeFromRecent by remember { AppConfig.isExcludeFromRecent }
+            SwitchPreference(
+                title = { Text(stringResource(id = R.string.exclude_from_recent)) },
+                subTitle = { Text(stringResource(id = R.string.exclude_from_recent_summary)) },
+                checked = excludeFromRecent,
+                onCheckedChange = { excludeFromRecent = it },
+                icon = {
+                    Icon(Icons.Default.HideSource, contentDescription = null)
                 }
             )
 

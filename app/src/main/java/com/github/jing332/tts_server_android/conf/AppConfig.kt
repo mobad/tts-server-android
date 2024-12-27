@@ -75,6 +75,12 @@ object AppConfig {
         initialValue = true
     )
 
+    val isExcludeFromRecent = mutableDataSaverStateOf(
+        dataSaverInterface = dataSaverPref,
+        key = "isExcludeFromRecent",
+        initialValue = false
+    )
+
     val isEdgeDnsEnabled = mutableDataSaverStateOf(
         dataSaverInterface = dataSaverPref,
         key = "isEdgeDnsEnabled",

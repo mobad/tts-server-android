@@ -434,4 +434,6 @@
     <string name="write_plugin_log_to_file">Write plugin log to file</string>
     <string name="add_shortcut_if_fail_tips">If that fails, grant the Add Shortcut permission</string>
     <string name="clear_text_content">Clear the text</string>
+    <string name="exclude_from_recent">Exclude From Recent</string>
+    <string name="exclude_from_recent_summary">Hide this application in [Recent Tasks].</string>
 </resources>

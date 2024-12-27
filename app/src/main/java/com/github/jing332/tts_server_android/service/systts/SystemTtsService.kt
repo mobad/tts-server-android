@@ -219,6 +219,13 @@ class SystemTtsService : TextToSpeechService(), TextToSpeechManager.Listener {
     private var mNotificationJob: Job? = null
 
     override fun onSynthesizeText(request: SynthesisRequest, callback: SynthesisCallback) {
+
+        if (request.charSequenceText == null ||
+            request.charSequenceText.isBlank()) {
+            callback.done()
+            return
+        }
+
         mNotificationJob?.cancel()
         reNewWakeLock()
         startForegroundService()

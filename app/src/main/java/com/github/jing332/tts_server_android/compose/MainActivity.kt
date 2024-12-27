@@ -5,6 +5,7 @@ package com.github.jing332.tts_server_android.compose
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -158,6 +159,15 @@ class MainActivity : AppCompatActivity() {
 
                 LaunchedEffect(Unit) {
                     showAutoCheckUpdaterDialog = AppConfig.isAutoCheckUpdateEnabled.value
+                }
+
+                val excludeFromRecent by AppConfig.isExcludeFromRecent
+                LaunchedEffect(excludeFromRecent) {
+                    (application.getSystemService(ACTIVITY_SERVICE) as ActivityManager).let { manager ->
+                        manager.appTasks.forEach { task ->
+                            task?.setExcludeFromRecents(excludeFromRecent)
+                        }
+                    }
                 }
 
                 LaunchedEffect(updateCheckTrigger) {

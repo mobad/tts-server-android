@@ -432,4 +432,6 @@
     <string name="write_plugin_log_to_file">写入插件日志到文件</string>
     <string name="add_shortcut_if_fail_tips">如果失败，请授予【添加快捷方式权限】</string>
     <string name="clear_text_content">清空文本内容</string>
+    <string name="exclude_from_recent">后台隐藏</string>
+    <string name="exclude_from_recent_summary">在[最近任务]中隐藏本应用</string>
 </resources>
