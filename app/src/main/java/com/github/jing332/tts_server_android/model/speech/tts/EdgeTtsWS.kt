@@ -19,6 +19,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.channels.Pipe
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.Objects
@@ -28,9 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class EdgeTtsWS : WebSocketListener() {
     companion object {
         const val TAG = "EdgeTtsWS"
+        private const val trustedClientToken = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
 
-        private const val wssUrl =
-            "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId="
+        private const val baseWssUrl = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${trustedClientToken}"
 
         private val simpleDateFormat by lazy {
             SimpleDateFormat(
@@ -42,6 +43,7 @@ class EdgeTtsWS : WebSocketListener() {
 
     private lateinit var ws: WebSocket
     private var uuid: String = ""
+    private var requestTime: Long = 0
     private var waitJob: Job? = null
 
     var connectStatus: Status = Status.Closed
@@ -54,24 +56,53 @@ class EdgeTtsWS : WebSocketListener() {
             .readTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .writeTimeout(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
             .pingInterval(SystemTtsConfig.requestTimeout.value.toLong(), TimeUnit.MILLISECONDS)
-            .retryOnConnectionFailure(true)
             .build()
         ws = client.newWebSocket(req, this)
     }
 
     private suspend fun connectSync(): Boolean = withIO {
-        val req = Request.Builder().url(wssUrl + uuid).apply {
+        val req = Request.Builder().url(getWssUrl()).apply {
             header("Accept-Encoding", "gzip, deflate, br")
             header("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
             header(
                 "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
             )
+            header("Pragma", "no-cache")
+            header("Cache-Control", "no-cache")
         }.build()
 
         connect(req)
 
         return@withIO connectStatus != Status.Connecting
+    }
+
+    private fun getWssUrl(): String {
+        return "${baseWssUrl}&Sec-MS-GEC=${getToken()}&Sec-MS-GEC-Version=1-130.0.2849.68&ConnectionId=${uuid}"
+    }
+
+    @OptIn(ExperimentalStdlibApi::class)
+    private fun getToken(): String {
+        val WIN_EPOCH = 11644473600
+        val S_TO_NS = 1_000_000_000
+
+        // Get the current timestamp in Unix format in seconds
+        var ticks = requestTime / 1000
+
+        // Switch to Windows file time epoch (1601-01-01 00:00:00 UTC)
+        ticks += WIN_EPOCH
+
+        // Round down to the nearest 5 minutes (300 seconds)
+        ticks -= ticks % 300
+
+        // Convert the ticks to 100-nanosecond intervals (Windows file time format)
+        ticks *= S_TO_NS / 100
+
+        val strToHash = "${ticks}${trustedClientToken}"
+
+        return MessageDigest.getInstance("SHA-256")
+            .digest(strToHash.toByteArray())
+            .toHexString(HexFormat.UpperCase)
     }
 
     private var sink: Pipe.SinkChannel? = null
@@ -87,6 +118,7 @@ class EdgeTtsWS : WebSocketListener() {
 
     suspend fun getAudio(ssml: String, format: String): InputStream = coroutineScope {
         uuid = UUID.randomUUID().toString(true)
+        requestTime = System.currentTimeMillis()
         val pipe = Pipe.open()
         sink = pipe.sink()
         sink?.configureBlocking(true)
@@ -126,7 +158,7 @@ class EdgeTtsWS : WebSocketListener() {
         val inputStream = object : InputStream() {
             private val source = pipeSource
             override fun read(): Int {
-                val b = ByteBuffer.allocate(0)
+                val b = ByteBuffer.allocate(1)
                 val read = source.read(b)
                 return if (read > 0) b.get().toInt() else -1
             }
@@ -161,7 +193,7 @@ class EdgeTtsWS : WebSocketListener() {
     }
 
     private val currentISOTime: String
-        get() = simpleDateFormat.format(System.currentTimeMillis())
+        get() = simpleDateFormat.format(requestTime)
 
     private fun sendSSML(ssml: String) {
         Log.d(TAG, "sendSSML: $ssml")
@@ -241,11 +273,8 @@ class EdgeTtsWS : WebSocketListener() {
         Log.d(TAG, "onMessage: $bytes")
 
         val index = bytes.indexOf("Path:audio".toByteArray())
-        if (index != -1) {
-            val data = bytes.substring(index + 12);
-
-            sink?.write(data.asByteBuffer())
-        }
+        val data = bytes.substring(index + 12);
+        sink?.write(data.asByteBuffer())
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
